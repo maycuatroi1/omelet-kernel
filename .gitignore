@@ -1,0 +1,12 @@
+# Buildroot artifacts (neu sau nay them source vao repo)
+output/
+dl/
+*.img
+*.bin
+*.ko
+
+# Secrets / configs ca nhan - KHONG commit
+*.key
+wg0.conf
+secrets/
+.env
