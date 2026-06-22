@@ -1,0 +1,14 @@
+
+   ___                _      _
+  / _ \ _ __ ___   ___| | ___| |_
+ | | | | '_ ` _ \ / _ \ |/ _ \ __|
+ | |_| | | | | | |  __/ |  __/ |_
+  \___/|_| |_| |_|\___|_|\___|\__|   kernel
+
+ Omelet - custom Raspberry Pi 4 kernel + image with opencode baked in.
+
+ * AI agent:   run `opencode` in any project dir
+ * API keys:   put provider keys in /etc/omelet/api-keys (then re-login)
+               e.g.  export ANTHROPIC_API_KEY=sk-ant-...
+ * Auth login: or run `opencode auth login` once to store credentials
+

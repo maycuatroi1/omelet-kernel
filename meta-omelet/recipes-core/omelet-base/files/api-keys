@@ -1,0 +1,9 @@
+# Provider API keys for opencode. This file is sourced on login.
+# Uncomment and fill in the provider(s) you use, then re-login (or `source` it).
+#
+# export ANTHROPIC_API_KEY=sk-ant-...
+# export OPENAI_API_KEY=sk-...
+# export OPENROUTER_API_KEY=sk-or-...
+#
+# Alternatively run `opencode auth login` once to store credentials in
+# ~/.local/share/opencode/auth.json (no need to edit this file).

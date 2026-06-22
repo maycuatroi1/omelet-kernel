@@ -1,0 +1,71 @@
+## kas configuration for the Omelet kernel / Pi 4 image
+## Build with:  ./scripts/build.sh        (wraps kas inside the kas Docker image)
+## Yocto release: scarthgap (5.0 LTS)
+header:
+  version: 14
+
+distro: omelet
+machine: raspberrypi4-64
+target: omelet-image
+
+repos:
+  # This repo (the one containing this kas file) provides meta-omelet.
+  omelet:
+    layers:
+      meta-omelet:
+
+  poky:
+    # GitHub mirror — much faster to clone than git.yoctoproject.org.
+    url: https://github.com/yoctoproject/poky
+    branch: scarthgap
+    layers:
+      meta:
+      meta-poky:
+
+  meta-openembedded:
+    url: https://github.com/openembedded/meta-openembedded
+    branch: scarthgap
+    layers:
+      meta-oe:
+      meta-python:
+      meta-networking:
+      meta-multimedia:
+
+  meta-raspberrypi:
+    url: https://github.com/agherzan/meta-raspberrypi
+    branch: scarthgap
+
+local_conf_header:
+  standard: |
+    CONF_VERSION = "2"
+    PACKAGE_CLASSES = "package_ipk"
+    USER_CLASSES ?= "buildstats"
+    # Docker VM here has 12 CPUs but only ~8GB RAM. cpu_count() would set both
+    # knobs to 12, so heavy C++ recipes (gcc, binutils-gold) compile concurrently
+    # and OOM-kill cc1plus. Cap so at most 2 recipes compile at once.
+    # These vars are in BB_BASEHASH_IGNORE_VARS, so changing them does NOT
+    # invalidate sstate (no rebuild of already-finished tasks).
+    BB_NUMBER_THREADS = "2"
+    PARALLEL_MAKE = "-j 4"
+    # Persist downloads + sstate across builds for fast incremental rebuilds.
+    DL_DIR ?= "${TOPDIR}/../downloads"
+    SSTATE_DIR ?= "${TOPDIR}/../sstate-cache"
+
+  raspberrypi: |
+    # --- Raspberry Pi 4 board tuning ---
+    ENABLE_UART = "1"
+    # Onboard BCM43455/43456 WiFi+BT firmware (rpidistro) is license-flagged.
+    LICENSE_FLAGS_ACCEPTED += "synaptics-killswitch"
+    # KMS/DRM driver -> needed so the kernel framebuffer boot logo shows.
+    RPI_KERNEL_DEVICETREE_OVERLAYS:append = " overlays/dwc2.dtbo"
+    # USB OTG/gadget (BadUSB/HID) - dr_mode otg via the Omelet kernel config.
+
+  diskmon: |
+    # Abort gracefully instead of filling the disk.
+    BB_DISKMON_DIRS ??= "\
+        STOPTASKS,${TMPDIR},1G,100K \
+        STOPTASKS,${DL_DIR},1G,100K \
+        STOPTASKS,${SSTATE_DIR},1G,100K \
+        HALT,${TMPDIR},100M,1K \
+        HALT,${DL_DIR},100M,1K \
+        HALT,${SSTATE_DIR},100M,1K"

@@ -1,12 +1,30 @@
-# Buildroot artifacts (neu sau nay them source vao repo)
-output/
-dl/
+# ---- Yocto / kas: cloned layers + build artifacts (do NOT commit) ----
+/poky/
+/meta-openembedded/
+/meta-raspberrypi/
+/build/
+/downloads/
+/sstate-cache/
+*.lock
+.kas*
+
+# Flashable images / kernel blobs
+*.wic
+*.wic.bz2
+*.wic.bmap
 *.img
 *.bin
 *.ko
 
-# Secrets / configs ca nhan - KHONG commit
+# ---- Buildroot artifacts (legacy) ----
+output/
+dl/
+
+# Secrets / personal configs - KHONG commit
 *.key
 wg0.conf
 secrets/
 .env
+
+# Built images copied out of the volume
+/deploy/
