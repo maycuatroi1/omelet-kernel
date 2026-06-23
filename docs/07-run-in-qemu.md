@@ -52,7 +52,9 @@ That's it. The script (`scripts/run-qemu.sh`):
    `./qemu/`,
 2. decompresses the newest `deploy/*.wic.bz2` to `./qemu/sd.img` and pads it to a
    power-of-2 size (QEMU's SD controller requires that),
-3. boots `qemu-system-aarch64 -M raspi4b` with the correct console / root args.
+3. injects a tiny `qemu-getty.service` into that **disposable SD copy** so a login
+   prompt actually appears on the serial console (see §3 for why this is needed),
+4. boots `qemu-system-aarch64 -M raspi4b` with the correct console / root args.
 
 **Quit QEMU:** press `Ctrl-A` then `X`.
 
@@ -81,19 +83,19 @@ Run /sbin/init as init process
 Welcome to Omelet 1.0 (omelet)!
 ...
 [  OK  ] Reached target Multi-User System.
-
-Omelet 1.0 (omelet) raspberrypi4-64 ttyAMA1
+...
 raspberrypi4-64 login:
 ```
 
 QEMU's `raspi4b` is slow (~10× wall-clock vs. guest time), so reaching the login
-prompt can take 1–2 minutes. That's normal.
+prompt can take ~1 minute. That's normal — if you see `Reached target Multi-User
+System` but no prompt yet, give it a few more seconds and press **Enter** (late
+kernel messages can scroll the prompt off the top).
 
-You will also see some units print **`FAILED`** along the way —
-`systemd-resolved`, `systemd-timesyncd`, `systemd-logind`, `systemd-hostnamed`,
-`dnsmasq`. These need a real network / RTC / DBus activation that the emulated
-board doesn't provide; they do **not** stop the boot and the system still reaches
-multi-user with a working console. Ignore them (see §4).
+You may also see a few units print **`FAILED`** along the way (e.g.
+`systemd-resolved`, `systemd-timesyncd`, `systemd-logind`). These need a real
+network / RTC / DBus activation the emulated board doesn't provide; they do
+**not** stop the boot. Ignore them (see §4).
 
 ---
 
@@ -117,13 +119,30 @@ docker run --rm -v "$PWD":/out -v omelet-build:/build --entrypoint bash \
 bunzip2 -kc ../deploy/omelet-image-*.wic.bz2 > sd.img
 truncate -s 4G sd.img
 
-# 3. Boot
+# 3. Inject a console getty into the SD copy (so a login prompt appears).
+#    Needs a privileged container to loop-mount the ext4 rootfs (partition 2).
+docker run --rm --privileged -v "$PWD":/q --entrypoint bash \
+  omelet-yocto-builder:latest -c '
+    OFF=$(python3 -c "import struct;m=open(\"/q/sd.img\",\"rb\").read(512);\
+p=[struct.unpack(\"<I\",m[446+i*16+8:446+i*16+12])[0] for i in range(4) \
+if struct.unpack(\"<I\",m[446+i*16+12:446+i*16+16])[0]];print(p[1]*512)")
+    mount -o loop,offset=$OFF /q/sd.img /mnt
+    printf "[Unit]\nDescription=QEMU console login\n[Service]\n\
+ExecStart=-/sbin/agetty -8 -L console 115200 linux\nType=idle\nRestart=always\n\
+[Install]\nWantedBy=multi-user.target\n" > /mnt/etc/systemd/system/qemu-getty.service
+    ln -sf /etc/systemd/system/qemu-getty.service \
+      /mnt/etc/systemd/system/multi-user.target.wants/qemu-getty.service
+    sync; umount /mnt'
+
+# 4. Boot
 qemu-system-aarch64 -M raspi4b -m 2G \
   -kernel Image -dtb bcm2711-rpi-4-b.dtb \
   -drive file=sd.img,format=raw,if=sd \
   -append "rootwait root=/dev/mmcblk1p2 console=ttyAMA1,115200 net.ifnames=0 \
            systemd.mask=boot.mount \
-           systemd.mask=psplash-start.service systemd.mask=psplash-quit.service" \
+           systemd.mask=psplash-start.service systemd.mask=psplash-quit.service \
+           systemd.mask=serial-getty@ttyS0.service \
+           systemd.mask=NetworkManager.service systemd.mask=dnsmasq.service" \
   -nographic -no-reboot
 ```
 
@@ -134,10 +153,12 @@ The non-obvious bits — each was found by actually booting this image:
 | pad `sd.img` to a power of 2 | QEMU's SD model rejects any other size (e.g. the raw 2.1 GB wic). |
 | `-kernel Image -dtb …` | QEMU does **not** run the Pi's GPU firmware boot chain (`start4.elf`), so `config.txt`/`cmdline.txt` are ignored — you hand the kernel + dtb to QEMU directly. |
 | `root=/dev/mmcblk1p2` | Under QEMU the SD card enumerates as **`mmcblk1`**, not `mmcblk0` as on real hardware. |
-| `console=ttyAMA1,115200` | The stdio PL011 UART registers as **`ttyAMA1`** in QEMU. Using `ttyAMA0` gives *"unable to open an initial console"* and no login prompt. |
+| `console=ttyAMA1,115200` | The stdio PL011 UART registers as **`ttyAMA1`** in QEMU (and `/dev/ttyAMA1` is never even created). Kernel/systemd messages still print here because it's `/dev/console`. |
+| **inject the console getty** | The image only enables `serial-getty@ttyS0` (the Pi's real mini-UART), which doesn't exist in QEMU; and `/dev/ttyAMA1` isn't created either, so **no getty ever runs** and you reach multi-user with no login prompt. Running `agetty` on `/dev/console` (always = the active serial) fixes it. |
 | `-nographic` (and **not** `-serial stdio`) | `-nographic` already wires the first serial to your terminal; adding `-serial stdio` too errors with *"cannot use stdio by multiple character devices"*. |
 | `systemd.mask=boot.mount` | `/etc/fstab` mounts `/boot` from `mmcblk0p1`, which never appears under QEMU → a 90 s start-job stall. Masking it skips the wait. |
 | `systemd.mask=psplash-*` | psplash waits on the framebuffer device `fb0`, which QEMU doesn't provide → another ~90 s stall. |
+| `systemd.mask=NetworkManager.service` (+ `dnsmasq`, `serial-getty@ttyS0`) | No NIC in QEMU, so NetworkManager stalls ~30 s on a DBus timeout and dnsmasq fails; masking them gives a fast, clean boot to the prompt. |
 | `-m 2G` | `raspi4b` has a **fixed** 2 GB of RAM; other values are rejected. |
 
 ---
@@ -186,7 +207,7 @@ real hardware.
 |---------|-----|
 | `qemu ... raspi4b ... is not a valid machine` | QEMU too old — upgrade to ≥ 8.x (`brew upgrade qemu`). |
 | Boot hangs at *"Waiting for root device"* | Wrong `root=`. Watch the log for the `mmcblkN: pN pN` line and set `root=/dev/mmcblkNp2` (usually `mmcblk1p2`). |
-| Kernel boots but no login prompt ever appears | Console mismatch — use `console=ttyAMA1,115200` (see §3). |
+| Reaches `Multi-User System` but **no `login:` prompt** (looks hung) | The image's getty is on `ttyS0` (absent in QEMU) and `/dev/ttyAMA1` isn't created, so no getty runs. Inject the console getty (step 3 of §3 — `scripts/run-qemu.sh` does this automatically). |
 | `cannot use stdio by multiple character devices` | You passed both `-nographic` and `-serial stdio`; drop `-serial stdio`. |
 | `Invalid SD card size` / SD errors | The image isn't a power-of-2 size — pad it (`truncate -s 4G sd.img`). |
 | Stuck ~90 s on `mmcblk0p1` or `fb0` start jobs | Add the `systemd.mask=…` args from §3 (the script already does). |
