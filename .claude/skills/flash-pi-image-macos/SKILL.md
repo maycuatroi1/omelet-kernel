@@ -68,7 +68,7 @@ diskutil eject /dev/diskN                       # safe to remove
 - **Never** target `/dev/disk0` (internal system disk) or any internal/synthesized disk.
 - Use the **raw** node `/dev/rdiskN` with `dd` (much faster than `/dev/diskN`).
 - `unmountDisk` (whole disk) before flashing; `eject` after.
-- `dd` is silent — press **Ctrl-T** to see progress, or add `status=progress` is not on macOS `dd`; the helper script prints byte counts via SIGINFO instead.
+- macOS `dd` has no `status=progress`. The helper shows a **live progress line** by polling dd with SIGINFO (cumulative bytes) every ~3 s — `make flask` / `flash.sh` print `NNN / NNN MiB (NN%)` automatically. If you run `dd` by hand, press **Ctrl-T** for a one-off readout. Installing `pv` (`brew install pv`) gives a fancier bar in interactive runs.
 
 ## Gotchas
 - macOS `dd` block-size flag is `bs=4m` (lowercase `m`), unlike Linux `bs=4M`.

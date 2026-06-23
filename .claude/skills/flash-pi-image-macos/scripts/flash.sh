@@ -28,7 +28,7 @@ usage() { sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 #  - Otherwise run dd in the background and poke it with SIGINFO every few seconds;
 #    macOS dd prints "<N> bytes transferred" on SIGINFO, which we parse into a %.
 flash_write() {
-    local size bytes pct
+    local size bytes pct last=0
     size=$(stat -f%z "$SRC" 2>/dev/null || echo 0)
 
     if command -v pv >/dev/null 2>&1 && [[ -z "${SUDO_PASSWORD:-}" ]]; then
@@ -65,6 +65,8 @@ flash_write() {
         sleep 0.3
         bytes=$(grep -oE '[0-9]+ bytes' "$ddlog" 2>/dev/null | tail -1 | grep -oE '^[0-9]+' || true)
         if [[ -n "$bytes" && "$size" -gt 0 ]]; then
+            (( bytes < last )) && bytes=$last   # SIGINFO is cumulative; ignore torn reads
+            last=$bytes
             pct=$(( bytes * 100 / size ))
             printf '\r  %d / %d MiB  (%d%%)          ' "$(( bytes / 1048576 ))" "$(( size / 1048576 ))" "$pct"
         fi
