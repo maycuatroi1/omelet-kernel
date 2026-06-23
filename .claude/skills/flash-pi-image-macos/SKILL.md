@@ -17,18 +17,36 @@ description: Flash a built Raspberry Pi SD-card image to a card on macOS. Use wh
 - The image to flash is the newest `deploy/omelet-image-*.wic.bz2` (compressed Yocto `wic` SD image for `raspberrypi4-64`).
 - If `deploy/` is empty, the build hasn't been copied out yet — run `./scripts/deploy-image.sh` (see [[yocto-build-macos-docker]]).
 
-## Recommended: helper script (safe)
-`scripts/flash.sh` in this skill folder wraps the whole flow with safety guards (refuses the internal disk, requires an explicit external `/dev/diskN`, unmounts → streams → ejects).
+## Quickest: `make flask`
+The repo Makefile wraps the script: `make disks` to find the card, then
+`make flask DISK=/dev/disk4` (add `IMAGE=…` for a specific file, `YES=1` to skip the prompt,
+or `SUDO_PASSWORD=… … YES=1` for non-interactive). `make flash` is an alias.
+
+## Helper script (what `make flask` calls)
+`scripts/flash.sh` wraps the whole flow with safety guards: refuses the internal system disk, requires an explicit `/dev/diskN`, confirms, then decompresses → unmounts → `dd` → ejects.
 
 ```bash
-# 1. See which disk the card is (external/physical only)
-diskutil list external physical
+# 1. Find the card. NOTE: the built-in SDXC reader shows up as "internal, physical"
+#    with `Device Location: Internal` — so `diskutil list external` may MISS it.
+#    Use the full list and match by size / "Built In SDXC Reader" / Secure Digital.
+diskutil list
 
 # 2. Flash newest deploy/*.wic.bz2 to that card (e.g. disk4)
 .claude/skills/flash-pi-image-macos/scripts/flash.sh /dev/disk4
-# or pass an explicit image:
+# or an explicit image:
 .claude/skills/flash-pi-image-macos/scripts/flash.sh /dev/disk4 deploy/omelet-image.wic.bz2
 ```
+
+### Non-interactive (running from a tool / no TTY)
+`bzcat IMAGE | sudo dd ...` FAILS without a TTY: `sudo: a terminal is required to read the password`.
+The script handles this by decompressing to a temp file first (so `dd` reads from a file and
+stdin is free to feed the password to `sudo -S`). Pass `-y` to skip the confirmation prompt and
+export `SUDO_PASSWORD`:
+
+```bash
+SUDO_PASSWORD='…' .claude/skills/flash-pi-image-macos/scripts/flash.sh -y /dev/disk4
+```
+Never hard-code or persist the password. Provide it inline only for the single run.
 
 ## Manual: `dd` pipeline (what deploy-image.sh prints)
 ```bash
@@ -54,6 +72,13 @@ diskutil eject /dev/diskN                       # safe to remove
 
 ## Gotchas
 - macOS `dd` block-size flag is `bs=4m` (lowercase `m`), unlike Linux `bs=4M`.
+- **Built-in SD reader is reported as `internal`.** Don't rely on `diskutil list external`; the guard in `flash.sh` only blocks `Location:Internal` **AND** `Removable:Not removable`, so it correctly permits the removable card while still refusing disk0.
+- **`diskutil eject` powers the card down** in the built-in reader — the device node disappears and you must physically re-insert it before flashing again. Don't eject until you're truly done.
+- `bzcat | sudo dd` needs a TTY for the sudo password — fails non-interactively (see Non-interactive section). The temp-file path avoids it.
 - "Resource busy" → something re-mounted the card; run `diskutil unmountDisk` again (add `force` if needed).
-- The compressed `.wic.bz2` decompresses to a full-card-size raw image; ensure the card is ≥ the image's uncompressed size.
+- The compressed `.wic.bz2` decompresses to a full image (~2.1 GB here); ensure the card is ≥ that size and `${TMPDIR:-/tmp}` has room.
 - After flashing, macOS may pop "disk not readable" for the Linux rootfs partition — that's normal; click **Eject**, not Initialize.
+
+## Verified working (2026-06-23)
+Flashed `omelet-image-raspberrypi4-64.rootfs.wic` (2.1 GB) to the Built In SDXC Reader at `/dev/disk4`
+@ ~26 MB/s in 86 s. Resulting card: `boot` (FAT32, 136 MB) + `Linux` (2.1 GB) — correct Pi4 layout.

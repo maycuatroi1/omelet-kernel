@@ -10,6 +10,7 @@ SRC_URI = " \
     file://opencode.json \
     file://vconsole.conf \
     file://locale.conf \
+    file://timesyncd-ntp.conf \
 "
 
 S = "${WORKDIR}"
@@ -39,6 +40,22 @@ do_install() {
     install -d ${D}${sysconfdir}
     install -m 0644 ${S}/vconsole.conf ${D}${sysconfdir}/vconsole.conf
     install -m 0644 ${S}/locale.conf ${D}${sysconfdir}/locale.conf
+
+    # NTP time sync so HTTPS certs validate on the RTC-less Pi4 (otherwise the
+    # stale boot clock trips "certificate is not yet valid" -- see the drop-in).
+    install -d ${D}${sysconfdir}/systemd/timesyncd.conf.d
+    install -m 0644 ${S}/timesyncd-ntp.conf \
+        ${D}${sysconfdir}/systemd/timesyncd.conf.d/omelet-ntp.conf
+
+    # Enable systemd-timesyncd.service explicitly. It is part of the systemd
+    # package (timesyncd is in its default PACKAGECONFIG), but we ship the
+    # enable symlink ourselves instead of relying on the distro preset, so the
+    # service is guaranteed active regardless of preset policy. The unit's
+    # [Install] section is WantedBy=sysinit.target. Path is the usrmerge
+    # location (DISTRO_FEATURES has usrmerge), so /lib -> /usr/lib.
+    install -d ${D}${sysconfdir}/systemd/system/sysinit.target.wants
+    ln -sf /usr/lib/systemd/system/systemd-timesyncd.service \
+        ${D}${sysconfdir}/systemd/system/sysinit.target.wants/systemd-timesyncd.service
 }
 
 FILES:${PN} = " \
@@ -46,12 +63,15 @@ FILES:${PN} = " \
     ${sysconfdir}/omelet/api-keys \
     ${sysconfdir}/vconsole.conf \
     ${sysconfdir}/locale.conf \
+    ${sysconfdir}/systemd/timesyncd.conf.d/omelet-ntp.conf \
+    ${sysconfdir}/systemd/system/sysinit.target.wants/systemd-timesyncd.service \
     /home/root/.config/opencode/opencode.json \
 "
 
-CONFFILES:${PN} = "${sysconfdir}/omelet/api-keys /home/root/.config/opencode/opencode.json"
+CONFFILES:${PN} = "${sysconfdir}/omelet/api-keys /home/root/.config/opencode/opencode.json ${sysconfdir}/systemd/timesyncd.conf.d/omelet-ntp.conf"
 
 # Branding pulls opencode in alongside it. kbd ships setfont + the
 # Lat2-Terminus16 Unicode console font that vconsole.conf loads (without these
 # systemd-vconsole-setup can't apply the font and the mojibake returns).
-RDEPENDS:${PN} = "opencode kbd kbd-consolefonts"
+# systemd provides systemd-timesyncd.service, which our enable symlink targets.
+RDEPENDS:${PN} = "opencode kbd kbd-consolefonts systemd"
