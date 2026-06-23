@@ -28,3 +28,4 @@ secrets/
 
 # Built images copied out of the volume
 /deploy/
+.claude/skills/learned/.processed/

@@ -25,6 +25,11 @@ IMAGE_INSTALL:append = " \
     wpa-supplicant \
     iproute2 \
     openssh-sftp-server \
+    omelet-wifi \
+    networkmanager \
+    networkmanager-nmcli \
+    networkmanager-wifi \
+    networkmanager-nmtui \
     "
 
 # Give opencode + builds some breathing room.

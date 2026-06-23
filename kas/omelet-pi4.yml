@@ -59,6 +59,11 @@ local_conf_header:
     # KMS/DRM driver -> needed so the kernel framebuffer boot logo shows.
     RPI_KERNEL_DEVICETREE_OVERLAYS:append = " overlays/dwc2.dtbo"
     # USB OTG/gadget (BadUSB/HID) - dr_mode otg via the Omelet kernel config.
+    # Put the VT into UTF-8 mode from the first boot message on, so the opencode
+    # TUI's Unicode block-art logo + bullets render correctly instead of
+    # mojibake (multi-byte UTF-8 decoded one byte at a time through the 8-bit
+    # CP437 console font: e.g. the block char U+2588 shows up as "âûê").
+    CMDLINE:append = " vt.default_utf8=1"
 
   diskmon: |
     # Abort gracefully instead of filling the disk.

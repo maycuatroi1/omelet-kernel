@@ -8,6 +8,8 @@ SRC_URI = " \
     file://omelet.sh \
     file://api-keys \
     file://opencode.json \
+    file://vconsole.conf \
+    file://locale.conf \
 "
 
 S = "${WORKDIR}"
@@ -29,15 +31,27 @@ do_install() {
     # Default opencode config for root.
     install -d ${D}/home/root/.config/opencode
     install -m 0644 ${S}/opencode.json ${D}/home/root/.config/opencode/opencode.json
+
+    # Console + locale so the opencode TUI renders UTF-8 (block-art logo,
+    # bullets) instead of mojibake. systemd-vconsole-setup reads vconsole.conf
+    # to load a Unicode console font + put the VTs in UTF-8 mode; locale.conf
+    # gives services/logins a UTF-8 default locale.
+    install -d ${D}${sysconfdir}
+    install -m 0644 ${S}/vconsole.conf ${D}${sysconfdir}/vconsole.conf
+    install -m 0644 ${S}/locale.conf ${D}${sysconfdir}/locale.conf
 }
 
 FILES:${PN} = " \
     ${sysconfdir}/profile.d/omelet.sh \
     ${sysconfdir}/omelet/api-keys \
+    ${sysconfdir}/vconsole.conf \
+    ${sysconfdir}/locale.conf \
     /home/root/.config/opencode/opencode.json \
 "
 
 CONFFILES:${PN} = "${sysconfdir}/omelet/api-keys /home/root/.config/opencode/opencode.json"
 
-# Branding pulls opencode in alongside it.
-RDEPENDS:${PN} = "opencode"
+# Branding pulls opencode in alongside it. kbd ships setfont + the
+# Lat2-Terminus16 Unicode console font that vconsole.conf loads (without these
+# systemd-vconsole-setup can't apply the font and the mojibake returns).
+RDEPENDS:${PN} = "opencode kbd kbd-consolefonts"

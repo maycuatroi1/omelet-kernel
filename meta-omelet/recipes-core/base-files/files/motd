@@ -7,6 +7,7 @@
 
  Omelet - custom Raspberry Pi 4 kernel + image with opencode baked in.
 
+ * WiFi:       run `wifi` to scan, pick a network and log in
  * AI agent:   run `opencode` in any project dir
  * API keys:   put provider keys in /etc/omelet/api-keys (then re-login)
                e.g.  export ANTHROPIC_API_KEY=sk-ant-...

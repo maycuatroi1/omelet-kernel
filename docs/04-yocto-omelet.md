@@ -57,6 +57,11 @@ meta-omelet/
 │   └── psplash/
 │       ├── psplash_git.bbappend   # override the splash image
 │       └── files/psplash-poky-img.png
+├── recipes-connectivity/
+│   ├── networkmanager/networkmanager_%.bbappend  # enable nmtui
+│   └── omelet-wifi/              # `wifi` CLI + NetworkManager tuning drop-in
+│       ├── omelet-wifi.bb
+│       └── files/{omelet-wifi,00-omelet.conf}
 └── recipes-devtools/opencode/
     └── opencode_1.17.9.bb         # prebuilt aarch64 opencode binary
 ```
@@ -95,6 +100,46 @@ encodes the version), rebuild.
 
 Regenerate both from `assets/omelet-logo.png` with `scripts/gen-logos.sh`
 (flatten+quantize for the kernel ppm; resize-keeping-alpha for psplash).
+
+### Console UTF-8
+
+The opencode TUI draws its logo from Unicode block elements (`█ ▀ ▄`, U+2580–259F)
+and uses `•` bullets. On a stock console these came out as mojibake (`âûê…`) —
+the multi-byte UTF-8 was being decoded one byte at a time through the 8-bit
+CP437 kernel font. Three layers fix it, all in `meta-omelet`:
+
+- **VT in UTF-8 mode** — `CMDLINE:append = " vt.default_utf8=1"` (kas
+  `raspberrypi` header) forces UTF-8 from the first boot message.
+- **Unicode console font** — `omelet-base` ships `/etc/vconsole.conf`
+  (`FONT=Lat2-Terminus16`) and pulls in `kbd` + `kbd-consolefonts`;
+  `systemd-vconsole-setup` loads the font and sets the VTs to UTF-8 at boot.
+- **Default locale** — `/etc/locale.conf` (`LANG=C.UTF-8`, built into glibc, no
+  generation) plus a `LANG` export in `omelet.sh` so the login shell that
+  launches opencode agrees on UTF-8.
+
+### WiFi (NetworkManager + `wifi` CLI)
+
+Networking is handled by **NetworkManager** (from `meta-networking`). The repo
+ships no static network config, so NM is the sole manager — it auto-DHCPs both
+`eth0` and `wlan0` and reconnects saved networks on boot. WiFi support pulls in
+`wpa-supplicant` (NM drives it over D-Bus); the `networkmanager_%.bbappend`
+turns on the `nmtui` PACKAGECONFIG so the ncurses UI is available too.
+
+`omelet-wifi` (recipe `recipes-connectivity/omelet-wifi`) is a friendly bash
+wrapper around `nmcli`, installed as `omelet-wifi` and the short alias `wifi`:
+
+```
+wifi                      # interactive menu (status + actions)
+wifi connect [SSID]       # scan, pick a number, type the password
+wifi scan | status | list | forget <SSID> | disconnect | on | off
+```
+
+Connecting saves a NetworkManager profile (autoconnect on), so the implant
+re-joins the network automatically after a reboot. `00-omelet.conf` is a
+`conf.d` drop-in that disables WiFi power-save (stable link) and scan MAC
+randomisation (predictable for MAC allow-lists — remove it for stealth).
+The regulatory database is already in the image via `packagegroup-base-wifi`
+(`wireless-regdb-static`) — don't also add `wireless-regdb`, the two conflict.
 
 ## Flashing
 
