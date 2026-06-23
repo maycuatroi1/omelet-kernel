@@ -28,4 +28,7 @@ secrets/
 
 # Built images copied out of the volume
 /deploy/
+
+# QEMU test artifacts (extracted kernel/dtb + padded SD image)
+/qemu/
 .claude/skills/learned/.processed/
