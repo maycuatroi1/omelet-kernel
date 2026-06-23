@@ -23,6 +23,59 @@ note() { printf '\033[36m%s\033[0m\n' "$*"; }
 
 usage() { sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
+# Write $SRC -> $RDISK with a live progress line.
+#  - If `pv` is installed (and not feeding a password via stdin) use it for a real bar.
+#  - Otherwise run dd in the background and poke it with SIGINFO every few seconds;
+#    macOS dd prints "<N> bytes transferred" on SIGINFO, which we parse into a %.
+flash_write() {
+    local size bytes pct
+    size=$(stat -f%z "$SRC" 2>/dev/null || echo 0)
+
+    if command -v pv >/dev/null 2>&1 && [[ -z "${SUDO_PASSWORD:-}" ]]; then
+        pv -s "$size" "$SRC" | sudo dd of="$RDISK" bs=4m
+        return $?
+    fi
+
+    local ddlog; ddlog="$(mktemp "${TMPDIR:-/tmp}/omelet-dd.XXXXXX")"
+    if [[ -n "${SUDO_PASSWORD:-}" ]]; then
+        printf '%s\n' "$SUDO_PASSWORD" | sudo -S dd if="$SRC" of="$RDISK" bs=4m 2>"$ddlog" &
+    else
+        sudo dd if="$SRC" of="$RDISK" bs=4m 2>"$ddlog" &
+    fi
+    local job=$!
+
+    # dd runs as root under sudo; grab its pid so we can signal it.
+    local ddpid=""
+    for _ in $(seq 1 25); do
+        ddpid=$(pgrep -x dd | tail -1 || true)
+        [[ -n "$ddpid" ]] && break
+        sleep 0.2
+    done
+
+    while kill -0 "$job" 2>/dev/null; do
+        sleep 3
+        kill -0 "$job" 2>/dev/null || break
+        if [[ -n "$ddpid" ]]; then
+            if [[ -n "${SUDO_PASSWORD:-}" ]]; then
+                printf '%s\n' "$SUDO_PASSWORD" | sudo -S kill -INFO "$ddpid" 2>/dev/null || true
+            else
+                sudo kill -INFO "$ddpid" 2>/dev/null || true
+            fi
+        fi
+        sleep 0.3
+        bytes=$(grep -oE '[0-9]+ bytes' "$ddlog" 2>/dev/null | tail -1 | grep -oE '^[0-9]+' || true)
+        if [[ -n "$bytes" && "$size" -gt 0 ]]; then
+            pct=$(( bytes * 100 / size ))
+            printf '\r  %d / %d MiB  (%d%%)          ' "$(( bytes / 1048576 ))" "$(( size / 1048576 ))" "$pct"
+        fi
+    done
+    local rc=0; wait "$job" || rc=$?
+    printf '\r%*s\r' 48 ''      # clear the progress line
+    cat "$ddlog" 2>/dev/null || true   # final dd summary (records + rate)
+    rm -f "$ddlog"
+    return $rc
+}
+
 # --- repo root (skill lives in <repo>/.claude/skills/flash-pi-image-macos/scripts) ---
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 
@@ -123,12 +176,8 @@ fi
 note "Unmounting $DISK ..."
 diskutil unmountDisk "$DISK"
 
-note "Writing $(basename "$SRC") -> $RDISK (Ctrl-T shows progress) ..."
-if [[ -n "${SUDO_PASSWORD:-}" ]]; then
-    printf '%s\n' "$SUDO_PASSWORD" | sudo -S dd if="$SRC" of="$RDISK" bs=4m
-else
-    sudo dd if="$SRC" of="$RDISK" bs=4m
-fi
+note "Writing $(basename "$SRC") ($(( $(stat -f%z "$SRC") / 1048576 )) MiB) -> $RDISK ..."
+flash_write
 
 note "Syncing & ejecting ..."
 sync
